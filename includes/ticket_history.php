@@ -2,7 +2,7 @@
 
 require_once __DIR__ . '/ticket_helpers.php';
 
-const TICKET_HISTORY_ACTIONS = ['created', 'updated', 'deleted', 'imported'];
+const TICKET_HISTORY_ACTIONS = ['created', 'updated', 'deleted', 'imported', 'transferred'];
 
 const TICKET_HISTORY_DIFF_FIELDS = [
     'Sprint',
@@ -15,6 +15,7 @@ const TICKET_HISTORY_DIFF_FIELDS = [
     'Change Type',
     'Created Time',
     'Release Status',
+    'Remarks',
 ];
 
 function ticketHistoryTableExists(PDO $pdo): bool
@@ -26,27 +27,6 @@ function ticketHistoryTableExists(PDO $pdo): bool
     $stmt->execute([DB_NAME, 'ticket_history']);
 
     return (int) $stmt->fetchColumn() > 0;
-}
-
-function fetchTicketRowById(PDO $pdo, int $id): ?array
-{
-    $sql = 'SELECT q.id, q.change_id, q.title, q.change_stage, q.change_status, q.change_type,
-                   q.created_time, rs.name AS release_status,
-                   s.name AS sprint_name,
-                   mo.name AS owner_name,
-                   mq.name AS qa_name
-            FROM qa_data q
-            INNER JOIN new_sprint s ON s.id = q.new_sprint_id
-            INNER JOIN release_status rs ON rs.id = q.release_status_id
-            INNER JOIN `user` mo ON mo.id = q.owner_user_id
-            LEFT JOIN `user` mq ON mq.id = q.qa_user_id
-            WHERE q.id = ?
-            LIMIT 1';
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([$id]);
-    $row = $stmt->fetch();
-
-    return $row ? formatTicketForFrontend($row) : null;
 }
 
 function diffTicketSnapshots(array $before, array $after): array
@@ -134,6 +114,7 @@ function ticketHistoryActionLabel(string $action): string
         'updated' => 'Updated',
         'deleted' => 'Deleted',
         'imported' => 'Imported',
+        'transferred' => 'Transferred',
         default => ucfirst($action),
     };
 }

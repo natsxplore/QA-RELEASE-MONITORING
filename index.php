@@ -10,7 +10,16 @@ $dbMessage = $dbStatus['message'];
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QA Release Monitoring</title>
-  <link rel="stylesheet" href="assets/css/style.css">
+  <style>
+<?php
+$cssPath = __DIR__ . '/assets/css/style.css';
+if (is_readable($cssPath)) {
+    readfile($cssPath);
+} else {
+    echo '/* QA Release Monitoring: assets/css/style.css not found on server — upload the assets/ folder */';
+}
+?>
+  </style>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -40,43 +49,43 @@ $dbMessage = $dbStatus['message'];
     <div class="filters" id="filtersBar">
       <div class="filter-group">
         <label for="titleFilter">Search Title:</label>
-        <input type="text" id="titleFilter" placeholder="Filter by Title..." oninput="renderApp()">
+        <input type="text" id="titleFilter" placeholder="Filter by Title..." oninput="onFilterChange()">
       </div>
       <div class="filter-group">
         <label for="dateFrom">Date From:</label>
-        <input type="date" id="dateFrom" onchange="renderApp()">
+        <input type="date" id="dateFrom" onchange="onFilterChange()">
       </div>
       <div class="filter-group">
         <label for="dateTo">Date To:</label>
-        <input type="date" id="dateTo" onchange="renderApp()">
+        <input type="date" id="dateTo" onchange="onFilterChange()">
       </div>
       <div class="filter-group">
         <label for="sprintFilter">Sprint:</label>
-        <select id="sprintFilter" onchange="renderApp()">
+        <select id="sprintFilter" onchange="onFilterChange()">
           <option value="all">All Sprints</option>
         </select>
       </div>
       <div class="filter-group">
+        <label for="typeFilter">Change Type:</label>
+        <select id="typeFilter" onchange="onFilterChange()">
+          <option value="all">All Types</option>
+        </select>
+      </div>
+      <div class="filter-group">
         <label for="stageFilter">Change Stage:</label>
-        <select id="stageFilter" onchange="renderApp()">
+        <select id="stageFilter" onchange="onFilterChange()">
           <option value="all">All Stages</option>
         </select>
       </div>
       <div class="filter-group">
         <label for="changeStatusFilter">Change Status:</label>
-        <select id="changeStatusFilter" onchange="renderApp()">
+        <select id="changeStatusFilter" onchange="onFilterChange()">
           <option value="all">All Statuses</option>
         </select>
       </div>
       <div class="filter-group">
-        <label for="typeFilter">Change Type:</label>
-        <select id="typeFilter" onchange="renderApp()">
-          <option value="all">All Types</option>
-        </select>
-      </div>
-      <div class="filter-group">
         <label for="statusFilter">Release Status:</label>
-        <select id="statusFilter" onchange="renderApp()">
+        <select id="statusFilter" onchange="onFilterChange()">
           <option value="all">All Statuses</option>
           <option value="Released">Released</option>
           <option value="For release">For release</option>
@@ -141,6 +150,24 @@ $dbMessage = $dbStatus['message'];
         </tbody>
       </table>
     </div>
+
+    <div class="pagination-footer">
+      <div class="filter-group">
+        <label for="rowsPerPageSelect">Rows per page:</label>
+        <select id="rowsPerPageSelect" onchange="changeRowsPerPage()">
+          <option value="10" selected>10</option>
+          <option value="25">25</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+      </div>
+      <span id="paginationInfo">Showing 0-0 of 0 items</span>
+      <div class="pagination-controls">
+        <button type="button" class="btn btn-neutral" id="prevBtn" onclick="prevPage()">Previous</button>
+        <span id="pageNumberDisplay" style="font-weight: 600;">Page 1</span>
+        <button type="button" class="btn btn-neutral" id="nextBtn" onclick="nextPage()">Next</button>
+      </div>
+    </div>
   </div>
   <?php else : ?>
   <div class="db-offline-panel">
@@ -162,12 +189,21 @@ $dbMessage = $dbStatus['message'];
   </div>
 
   <div class="modal-overlay" id="ticketModal">
-    <div class="modal">
+    <div class="modal modal-ticket">
       <h3 id="modalTitle">Add New Ticket Data</h3>
+      <div class="modal-body">
       <input type="hidden" id="editingTicketId" value="">
       <div class="form-group">
         <label>Sprint Category</label>
         <select id="newTicketSprint"></select>
+      </div>
+      <div class="transfer-box" id="transferSprintSection" hidden>
+        <div class="transfer-box-title">Transfer Ticket to Other Sprint</div>
+        <div class="form-group" style="margin-bottom: 0.5rem;">
+          <label for="targetSprintSelect">Target Sprint:</label>
+          <select id="targetSprintSelect"></select>
+        </div>
+        <button type="button" class="btn btn-transfer" id="transferSprintBtn" onclick="transferTicketSprint()">Transfer Sprint</button>
       </div>
       <div class="form-group">
         <label>Change ID (e.g., CH-1520)</label>
@@ -186,6 +222,32 @@ $dbMessage = $dbStatus['message'];
         <select id="newTicketQA"></select>
       </div>
       <div class="form-group">
+        <label>Change Stage</label>
+        <select id="newTicketStage">
+          <option value="Planning">Planning</option>
+          <option value="Development">Development</option>
+          <option value="Leader Code Review">Leader Code Review</option>
+          <option value="UAT">UAT</option>
+          <option value="Implementation">Implementation</option>
+          <option value="Release">Release</option>
+          <option value="Close">Close</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Change Status</label>
+        <select id="newTicketChangeStatus">
+          <option value="Active">Active</option>
+          <option value="Pending - For RCA">Pending - For RCA</option>
+          <option value="Development In Progress">Development In Progress</option>
+          <option value="Leader Code Review">Leader Code Review</option>
+          <option value="Dev Rework">Dev Rework</option>
+          <option value="For UAT">For UAT</option>
+          <option value="Release Associated">Release Associated</option>
+          <option value="Open">Open</option>
+          <option value="Completed">Completed</option>
+        </select>
+      </div>
+      <div class="form-group">
         <label>Change Type</label>
         <select id="newTicketType">
           <option value="Emergency">Emergency</option>
@@ -200,6 +262,11 @@ $dbMessage = $dbStatus['message'];
           <option value="Released">Released</option>
           <option value="Not in release">Not in release</option>
         </select>
+      </div>
+      <div class="form-group">
+        <label for="ticketRemarks">Remarks / Notes:</label>
+        <textarea id="ticketRemarks" rows="3" placeholder="Add remarks or reason for sprint transfer..."></textarea>
+      </div>
       </div>
       <div class="modal-actions">
         <button type="button" class="btn btn-reset" onclick="closeModal('ticketModal')">Cancel</button>
@@ -269,14 +336,18 @@ $dbMessage = $dbStatus['message'];
 
   <div class="modal-overlay" id="importModal">
     <div class="modal">
-      <h3>Import Ticket Data</h3>
+      <h3>Import / Export Ticket Data</h3>
       <div class="import-box">
-        <p style="font-size:0.85rem; color:#475569; margin-top:0;">Download the required format template, fill it out, and upload it below.</p>
-        <button type="button" class="btn btn-secondary" onclick="downloadXlsxTemplate()">📥 Download XLSX Template</button>
+        <p style="font-size:0.85rem; color:#475569; margin:0;">Download template or export existing system data:</p>
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center;">
+          <button type="button" class="btn btn-secondary" onclick="downloadXlsxTemplate()">📥 Download XLSX Template</button>
+          <button type="button" class="btn btn-neutral" onclick="exportAllExistingFiles()">📤 Export All Existing Data</button>
+        </div>
       </div>
       <div class="form-group">
-        <label>Select Spreadsheet File (.xlsx or .csv)</label>
+        <label>Select Spreadsheet File (.xlsx, .xls, or .csv)</label>
         <input type="file" id="xlsxFileInput" accept=".xlsx, .xls, .csv">
+        <small style="color:#64748b; font-size: 0.75rem; margin-top: 0.25rem;">Note: If imported tickets contain an existing <b>Change ID</b>, their records will be overwritten.</small>
       </div>
       <div class="modal-actions">
         <button type="button" class="btn btn-reset" onclick="closeModal('importModal')">Cancel</button>
@@ -291,6 +362,15 @@ $dbMessage = $dbStatus['message'];
       message: <?php echo json_encode($dbMessage, JSON_UNESCAPED_UNICODE); ?>
     };
   </script>
-  <script src="assets/js/app.js"></script>
+  <script>
+<?php
+$jsPath = __DIR__ . '/assets/js/app.js';
+if (is_readable($jsPath)) {
+    readfile($jsPath);
+} else {
+    echo 'console.error("QA Release Monitoring: assets/js/app.js not found on server — upload the assets/ folder.");';
+}
+?>
+  </script>
 </body>
 </html>

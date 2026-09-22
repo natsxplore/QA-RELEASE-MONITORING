@@ -238,29 +238,36 @@ testCase('8 — Invalid ticket payload validation', function () use ($baseUrl) {
     return $json['success'] === false;
 });
 
-testCase('9 — POST api/tickets/import.php', function () use ($baseUrl, $testSprint, $testDev, $testQa) {
+testCase('9 — POST api/tickets/import.php (insert + upsert)', function () use ($baseUrl, $testSprint, $testDev, $testQa) {
     $importId = 'CH-TEST-IMP-' . random_int(1000, 9999);
-    $json = httpPost("{$baseUrl}/api/tickets/import.php", [
-        'tickets' => [
-            [
-                'Sprint' => $testSprint,
-                'Change ID' => $importId,
-                'Title' => 'Import row test',
-                'Change Owner' => $testDev,
-                'Assigned QA' => $testQa,
-                'Change Stage' => 'Development',
-                'Change Status' => 'Active',
-                'Change Type' => 'Normal',
-                'Release Status' => 'For release',
-            ],
-        ],
-    ]);
+    $rowPayload = [
+        'Sprint' => $testSprint,
+        'Change ID' => $importId,
+        'Title' => 'Import row test',
+        'Change Owner' => $testDev,
+        'Assigned QA' => $testQa,
+        'Change Stage' => 'Development',
+        'Change Status' => 'Active',
+        'Change Type' => 'Normal',
+        'Release Status' => 'For release',
+    ];
+    $json = httpPost("{$baseUrl}/api/tickets/import.php", ['tickets' => [$rowPayload]]);
     if ($json['success'] !== true || ($json['data']['imported'] ?? 0) < 1) {
         return false;
     }
+
+    $rowPayload['Title'] = 'Import row test (overwritten)';
+    $json2 = httpPost("{$baseUrl}/api/tickets/import.php", ['tickets' => [$rowPayload]]);
+    if ($json2['success'] !== true || ($json2['data']['updated'] ?? 0) < 1) {
+        return false;
+    }
+
     $data = httpGet("{$baseUrl}/api/data.php");
     foreach ($data['data']['tickets'] ?? [] as $row) {
         if (($row['Change ID'] ?? '') === $importId) {
+            if (($row['Title'] ?? '') !== 'Import row test (overwritten)') {
+                return false;
+            }
             httpPost("{$baseUrl}/api/tickets/delete.php", ['id' => $row['id']]);
 
             return true;
@@ -283,6 +290,37 @@ testCase('12 — GET api/tickets/history.php', function () use ($baseUrl, &$crea
     $actions = array_column($history, 'action');
 
     return in_array('created', $actions, true) && in_array('updated', $actions, true);
+});
+
+testCase('13 — POST api/tickets/transfer_sprint.php', function () use ($baseUrl, &$createdTicketId, $testSprint) {
+    global $createdTicketId;
+    if (!$createdTicketId) {
+        return false;
+    }
+    $targetSprint = 'Test Sprint Transfer ' . substr((string) time(), -4);
+    $sprintRes = httpPost("{$baseUrl}/api/sprints/create.php", ['sprintName' => $targetSprint]);
+    if ($sprintRes['success'] !== true) {
+        return false;
+    }
+    $json = httpPost("{$baseUrl}/api/tickets/transfer_sprint.php", [
+        'id' => $createdTicketId,
+        'targetSprint' => $targetSprint,
+        'transferReason' => 'API test transfer',
+    ]);
+    if ($json['success'] !== true) {
+        return false;
+    }
+    $data = httpGet("{$baseUrl}/api/data.php");
+    foreach ($data['data']['tickets'] ?? [] as $row) {
+        if ((int) ($row['id'] ?? 0) === $createdTicketId) {
+            $remarks = $row['Remarks'] ?? '';
+            return ($row['Sprint'] ?? '') === $targetSprint
+                && str_contains($remarks, 'Transferred from')
+                && str_contains($remarks, $testSprint);
+        }
+    }
+
+    return false;
 });
 
 testCase('10 — POST api/tickets/delete.php', function () use ($baseUrl, &$createdTicketId) {

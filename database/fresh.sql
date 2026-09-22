@@ -28,5 +28,5 @@ INSERT INTO release_status (name) VALUES
 ('Not in release')
 ON DUPLICATE KEY UPDATE name = release_status.name;
 
-INSERT INTO schema_migrations (version) VALUES ('2026.03.26.4')
+INSERT INTO schema_migrations (version) VALUES ('2026.03.26.5')
 ON DUPLICATE KEY UPDATE version = schema_migrations.version;

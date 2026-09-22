@@ -47,7 +47,8 @@ If the database is not connected, the page shows setup instructions only — **n
 | **`new_sprint`** | Sprint names created via **New Sprint** or imports |
 | **`user`** | Developers and QA (`role` = `Developer` or `QA`) |
 | **`release_status`** | Lookup: `Released`, `For release`, `Not in release` (linked from `qa_data.release_status_id`) |
-| **`ticket_history`** | Audit log per ticket: `created`, `updated`, `deleted`, `imported` (JSON details + timestamp) |
+| **`ticket_history`** | Audit log per ticket: `created`, `updated`, `deleted`, `imported`, `transferred` (JSON details + timestamp) |
+| **`qa_data.remarks`** | Optional notes and sprint-transfer log lines (TEXT) |
 
 The UI still uses labels like “Change ID” and “Release Status”; only the **MySQL table names** above are used in the schema and PHP.
 
@@ -77,9 +78,25 @@ When a new version of this project adds database changes:
 
 1. Back up your database (export from phpMyAdmin).
 2. Import **`database/schema.sql`** again (creates any missing tables only).
-3. Import **`database/migrate.sql`** (applies new `ALTER` statements; safe to run multiple times).
-4. **Do not** import **`database/fresh.sql`** or **`database/reset.sql`** on production unless you intend to wipe data (`fresh.sql` = empty tables; `reset.sql` = drop tables).
-5. **Do not** re-import **`database/seed.sql`** on production unless you only want to fill in *missing* demo rows — existing `qa_data` rows with the same Change ID are left unchanged.
+3. Apply migrations (pick one):
+   - **CLI (recommended):** from the project root, `php migrate.php` — runs only pending steps; does not delete rows.
+   - **phpMyAdmin:** import **`database/migrate.sql`** (idempotent `ALTER` blocks; safe to re-run).
+4. If you already imported **`migrate.sql`** by hand and the app works, run **`php migrate.php sync-legacy`** once so the CLI knows those steps are done (optional; avoids re-running the same SQL later).
+5. **Do not** import **`database/fresh.sql`** or **`database/reset.sql`** on production unless you intend to wipe data (`fresh.sql` = empty tables; `reset.sql` = drop tables).
+6. **Do not** re-import **`database/seed.sql`** on production unless you only want to fill in *missing* demo rows — existing `qa_data` rows with the same Change ID are left unchanged.
+
+#### `php migrate.php` (Laravel-style)
+
+Requires **`api/config.php`** and base tables from **`schema.sql`**.
+
+| Command | Purpose |
+|---------|---------|
+| `php migrate.php` | Run pending migrations from **`database/migrations/`** |
+| `php migrate.php status` | Show Ran / Pending per file |
+| `php migrate.php --pretend` | Dry run (lists pending only) |
+| `php migrate.php sync-legacy` | Record all migrations as applied without SQL (after manual **`migrate.sql`**) |
+
+New schema changes: add a new `database/migrations/YYYY_MM_DD_NNNNN_description.php` file (return a callable that runs idempotent SQL) and mirror the same SQL in **`database/migrate.sql`** for hosts without SSH/CLI.
 
 If you still have the **old** table names (`tickets`, `sprints`, `members`), run **`database/reset.sql`** on a dev copy only, then import **`schema.sql`** → **`migrate.sql`** → **`seed.sql`** (or migrate data manually before dropping old tables).
 
@@ -96,7 +113,7 @@ This refreshes **`database/seed.sql`** and **`database.sql`**.
 1. Create hosting + MySQL database in the InfinityFree panel.
 2. phpMyAdmin: import **`database/schema.sql`**, **`database/migrate.sql`**, and optionally **`database/seed.sql`**.
 3. Copy **`api/config.example.php`** to **`api/config.php`** with the panel’s hostname, database name, user, and password.
-4. Upload all files (keep `api/`, `assets/`, `includes/`, `index.php`, `.htaccess`).
+4. Upload all files (keep `api/`, `assets/`, `includes/`, `index.php`, `.htaccess`). The **`assets/`** folder must be on the server: `index.php` embeds **`assets/css/style.css`** and **`assets/js/app.js`** via PHP (editing those files still updates the UI; static `/assets/...` URLs are not required for the main page).
 5. Visit your site URL (`index.php`).
 
 ## Project layout
@@ -105,7 +122,7 @@ This refreshes **`database/seed.sql`** and **`database.sql`**.
 index.php              Main page (PHP checks DB before showing data)
 api/                   JSON API (PDO + transactions)
 includes/              Shared PHP helpers
-assets/css, assets/js  Frontend
+assets/css, assets/js  Frontend sources (inlined into index.php at runtime)
 database/              SQL scripts (schema, migrate, seed, fresh, reset)
 database.sql           Combined safe install for phpMyAdmin
 ```
@@ -114,10 +131,12 @@ database.sql           Combined safe install for phpMyAdmin
 
 - `GET api/data.php` — load tickets, sprints, members
 - `GET api/tickets/history.php?id={ticketId}` — action history for a ticket
-- `POST api/tickets/create.php`, `update.php`, `delete.php`, `import.php`
+- `POST api/tickets/create.php`, `update.php`, `delete.php`, `import.php`, `transfer_sprint.php`
 - `POST api/sprints/create.php`, `api/members/create.php`
 
 Write operations use **database transactions** (commit on success, rollback on failure).
+
+**Import** upserts by **Change ID** (existing rows are updated). **Export all data** runs in the browser (SheetJS) from the loaded ticket list—no extra API.
 
 ## Testing
 

@@ -10,21 +10,20 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 $body = readJsonBody();
-$ticket = $body['ticket'] ?? $body;
-if (!is_array($ticket)) {
-    jsonError('Invalid ticket data.');
-}
-$id = requirePositiveInt($body['id'] ?? $ticket['id'] ?? null, 'ticket id');
+$id = requirePositiveInt($body['id'] ?? null, 'ticket id');
+$targetSprint = requireNonEmptyString($body['targetSprint'] ?? null, 'target sprint', 100);
+$transferReason = trim((string) ($body['transferReason'] ?? ''));
 
 try {
-    $fields = ticketPayloadFromRequest($ticket, true);
     $pdo = assertDatabaseConnection();
-    dbTransaction($pdo, function (PDO $pdo) use ($id, $fields) {
+    dbTransaction($pdo, function (PDO $pdo) use ($id, $targetSprint, $transferReason) {
         $before = fetchTicketRowById($pdo, $id);
         if ($before === null) {
             throw new TicketNotFoundException();
         }
-        updateTicketById($pdo, $id, $fields);
+
+        transferTicketSprint($pdo, $id, $targetSprint, $transferReason);
+
         if (ticketHistoryTableExists($pdo)) {
             $after = fetchTicketRowById($pdo, $id);
             if ($after !== null) {
@@ -33,14 +32,16 @@ try {
                     $pdo,
                     $id,
                     $after['Change ID'],
-                    'updated',
+                    'transferred',
                     ['changes' => $changes, 'snapshot' => $after]
                 );
             }
         }
     });
 
-    jsonSuccess(['id' => $id]);
+    $pdo = getDb();
+    $ticket = fetchTicketRowById($pdo, $id);
+    jsonSuccess(['id' => $id, 'ticket' => $ticket]);
 } catch (TicketNotFoundException $e) {
     jsonError('Ticket not found.', 404);
 } catch (TicketValidationException $e) {
@@ -49,5 +50,5 @@ try {
     handleDbException($e);
 } catch (Throwable $e) {
     logServerError($e);
-    jsonError('Unable to update ticket.', 500, false);
+    jsonError('Unable to transfer ticket.', 500, false);
 }

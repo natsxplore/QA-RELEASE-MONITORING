@@ -19,7 +19,7 @@ function getDatabaseStatus(): array
     if (!isDatabaseConfigured()) {
         return [
             'connected' => false,
-            'message' => 'Database is not configured. Update api/config.php, then import database/schema.sql (and database/migrate.sql) in phpMyAdmin.',
+            'message' => 'Database is not configured. Update api/config.php, then import database/schema.sql and run php migrate.php (or import database/migrate.sql in phpMyAdmin).',
         ];
     }
 
@@ -41,7 +41,7 @@ function getDatabaseStatus(): array
 
                 return [
                     'connected' => false,
-                    'message' => 'Database tables are missing. Import database/schema.sql and database/migrate.sql in phpMyAdmin.' . $legacyHint,
+                    'message' => 'Database tables are missing. Import database/schema.sql, then run php migrate.php (or import database/migrate.sql in phpMyAdmin).' . $legacyHint,
                 ];
             }
         }

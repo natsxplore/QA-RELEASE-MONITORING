@@ -19,8 +19,10 @@ try {
     $pdo = assertDatabaseConnection();
     $summary = dbTransaction($pdo, function (PDO $pdo) use ($rows) {
         $imported = 0;
+        $updated = 0;
         $skipped = 0;
         $errors = [];
+        $logHistory = ticketHistoryTableExists($pdo);
 
         foreach ($rows as $index => $row) {
             if (!is_array($row)) {
@@ -29,45 +31,56 @@ try {
                 continue;
             }
 
+            $changeIdKey = trim((string) ($row['Change ID'] ?? $row['change_id'] ?? ''));
+            $existingId = $changeIdKey !== '' ? findTicketIdByChangeId($pdo, $changeIdKey) : null;
+            $before = $existingId !== null ? fetchTicketRowById($pdo, $existingId) : null;
+
             try {
-                $fields = buildTicketPayload($row, false);
+                $result = upsertTicketFromImport($pdo, $row);
             } catch (TicketValidationException $e) {
                 $skipped++;
                 $errors[] = 'Row ' . ($index + 1) . ': ' . $e->getMessage();
                 continue;
             }
 
-            try {
-                $newId = insertTicket($pdo, $fields);
-                if (ticketHistoryTableExists($pdo)) {
-                    $snapshot = fetchTicketRowById($pdo, $newId);
-                    if ($snapshot !== null) {
+            if ($logHistory) {
+                $snapshot = fetchTicketRowById($pdo, $result['id']);
+                if ($snapshot !== null) {
+                    if ($result['mode'] === 'insert') {
                         recordTicketHistory(
                             $pdo,
-                            $newId,
+                            $result['id'],
                             $snapshot['Change ID'],
                             'imported',
                             ['snapshot' => $snapshot]
                         );
+                    } else {
+                        $changes = $before !== null ? diffTicketSnapshots($before, $snapshot) : [];
+                        recordTicketHistory(
+                            $pdo,
+                            $result['id'],
+                            $snapshot['Change ID'],
+                            'updated',
+                            ['changes' => $changes, 'snapshot' => $snapshot]
+                        );
                     }
                 }
+            }
+
+            if ($result['mode'] === 'insert') {
                 $imported++;
-            } catch (PDOException $e) {
-                if ((int) $e->errorInfo[1] === 1062) {
-                    $skipped++;
-                    $errors[] = 'Row ' . ($index + 1) . ': duplicate Change ID.';
-                    continue;
-                }
-                throw $e;
+            } else {
+                $updated++;
             }
         }
 
-        if ($imported === 0 && $skipped > 0) {
+        if ($imported === 0 && $updated === 0 && $skipped > 0) {
             throw new TicketValidationException('No tickets were imported. Fix the rows reported in errors.');
         }
 
         return [
             'imported' => $imported,
+            'updated' => $updated,
             'skipped' => $skipped,
             'errors' => $errors,
         ];

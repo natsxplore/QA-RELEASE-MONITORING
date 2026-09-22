@@ -7,6 +7,7 @@ const API = {
   ticketDelete: 'api/tickets/delete.php',
   ticketImport: 'api/tickets/import.php',
   ticketHistory: 'api/tickets/history.php',
+  ticketTransferSprint: 'api/tickets/transfer_sprint.php',
   sprintCreate: 'api/sprints/create.php',
   memberCreate: 'api/members/create.php',
 };
@@ -23,6 +24,8 @@ let dbConnectionMessage = (window.APP_DB && window.APP_DB.message) || '';
 let currentSortColumn = null;
 let currentSortAsc = true;
 let activeMenuTicketId = null;
+let currentPage = 1;
+let rowsPerPage = 10;
 
 function requireDatabaseConnection(actionLabel) {
   if (dbConnected) return true;
@@ -74,15 +77,20 @@ async function apiPost(url, body) {
     };
   }
 
+  const rawText = await res.text();
   let data;
   try {
-    data = await res.json();
+    data = rawText ? JSON.parse(rawText) : null;
   } catch (err) {
-    console.error(err);
+    console.error(err, rawText);
+    const hint =
+      res.status >= 500
+        ? ' Server error — check that database/migrate.sql was imported (release_status rows).'
+        : '';
     return {
       success: false,
-      connected: false,
-      message: 'Invalid server response.',
+      connected: res.status === 503 ? false : true,
+      message: `Invalid server response.${hint}`,
     };
   }
 
@@ -203,10 +211,22 @@ function populateDropdowns() {
   });
 
   const modalDev = document.getElementById('newTicketDev');
-  modalDev.innerHTML = developers.map((d) => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('');
+  if (developers.length === 0) {
+    modalDev.innerHTML = '<option value="">— Add a Developer first —</option>';
+  } else {
+    modalDev.innerHTML = developers
+      .map((d) => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`)
+      .join('');
+  }
 
   const modalQA = document.getElementById('newTicketQA');
-  modalQA.innerHTML = qaMembers.map((q) => `<option value="${escapeHtml(q)}">${escapeHtml(q)}</option>`).join('');
+  if (qaMembers.length === 0) {
+    modalQA.innerHTML = '<option value="Not Assigned">Not Assigned</option>';
+  } else {
+    modalQA.innerHTML = qaMembers
+      .map((q) => `<option value="${escapeHtml(q)}">${escapeHtml(q)}</option>`)
+      .join('');
+  }
 }
 
 function escapeHtml(str) {
@@ -215,6 +235,43 @@ function escapeHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function onFilterChange() {
+  currentPage = 1;
+  renderApp();
+}
+
+function changeRowsPerPage() {
+  const select = document.getElementById('rowsPerPageSelect');
+  if (!select) return;
+  rowsPerPage = parseInt(select.value, 10) || 10;
+  currentPage = 1;
+  renderApp();
+}
+
+function prevPage() {
+  if (currentPage > 1) {
+    currentPage -= 1;
+    renderApp();
+  }
+}
+
+function nextPage() {
+  currentPage += 1;
+  renderApp();
+}
+
+function ensureSelectOption(selectId, value) {
+  if (!value) return;
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  if (![...select.options].some((o) => o.value === value)) {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = value;
+    select.appendChild(opt);
+  }
 }
 
 function sortTable(columnKey) {
@@ -311,14 +368,38 @@ function renderApp() {
   document.getElementById('kpiNotInRelease').textContent = notInReleaseCount;
   document.getElementById('subNotInRelease').textContent = `${notInReleasePct}%`;
 
+  const totalPages = Math.ceil(totalCount / rowsPerPage) || 1;
+  if (currentPage > totalPages) currentPage = totalPages;
+  if (currentPage < 1) currentPage = 1;
+
+  const startIdx = (currentPage - 1) * rowsPerPage;
+  const endIdx = Math.min(startIdx + rowsPerPage, totalCount);
+  const paginatedItems = filtered.slice(startIdx, endIdx);
+
+  const paginationInfo = document.getElementById('paginationInfo');
+  const pageNumberDisplay = document.getElementById('pageNumberDisplay');
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  if (paginationInfo) {
+    paginationInfo.textContent =
+      totalCount === 0
+        ? 'Showing 0-0 of 0 items'
+        : `Showing ${startIdx + 1}-${endIdx} of ${totalCount} items`;
+  }
+  if (pageNumberDisplay) {
+    pageNumberDisplay.textContent = `Page ${currentPage} of ${totalPages}`;
+  }
+  if (prevBtn) prevBtn.disabled = currentPage <= 1;
+  if (nextBtn) nextBtn.disabled = currentPage >= totalPages;
+
   const tbody = document.getElementById('tableBody');
   tbody.innerHTML = '';
 
-  if (filtered.length === 0) {
+  if (paginatedItems.length === 0) {
     tbody.innerHTML =
       '<tr><td colspan="10" style="text-align:center; color:#64748b;">No matching tickets found.</td></tr>';
   } else {
-    filtered.forEach((row) => {
+    paginatedItems.forEach((row) => {
       const tr = document.createElement('tr');
       const releaseStatus = row['Release Status'] || '';
       let tagClass = '';
@@ -374,11 +455,15 @@ function openCreateModal() {
   document.getElementById('editingTicketId').value = '';
   document.getElementById('modalTitle').textContent = 'Add New Ticket Data';
   document.getElementById('saveTicketBtn').style.display = 'inline-block';
+  document.getElementById('transferSprintSection').hidden = true;
   setFormDisabled(false);
 
   document.getElementById('newTicketId').value = '';
   document.getElementById('newTicketId').disabled = false;
   document.getElementById('newTicketTitle').value = '';
+  document.getElementById('newTicketStage').value = 'Development';
+  document.getElementById('newTicketChangeStatus').value = 'Active';
+  document.getElementById('ticketRemarks').value = '';
   openModal('ticketModal');
 }
 
@@ -390,6 +475,7 @@ function viewCurrentTicket() {
   document.getElementById('editingTicketId').value = ticket.id;
   document.getElementById('modalTitle').textContent = 'View Ticket Details';
   document.getElementById('saveTicketBtn').style.display = 'none';
+  document.getElementById('transferSprintSection').hidden = true;
 
   fillModalFields(ticket);
   setFormDisabled(true);
@@ -462,7 +548,7 @@ async function viewTicketHistory() {
   const tbody = document.getElementById('historyTableBody');
   history.forEach((entry) => {
     const tr = document.createElement('tr');
-    const actionClass = `action-${entry.action || 'updated'}`;
+    const actionClass = `action-${(entry.action || 'updated').replace(/_/g, '-')}`;
     tr.innerHTML = `
       <td>${escapeHtml(entry.created_at || '')}</td>
       <td><span class="history-action ${actionClass}">${escapeHtml(entry.action_label || entry.action || '')}</span></td>
@@ -481,6 +567,7 @@ function editCurrentTicket() {
   document.getElementById('editingTicketId').value = ticket.id;
   document.getElementById('modalTitle').textContent = 'Edit Ticket Details';
   document.getElementById('saveTicketBtn').style.display = 'inline-block';
+  document.getElementById('transferSprintSection').hidden = false;
 
   fillModalFields(ticket);
   setFormDisabled(false);
@@ -512,8 +599,71 @@ function fillModalFields(ticket) {
   }
   qaSelect.value = qaVal && qaVal !== 'Not Assigned' ? qaVal : qaMembers[0] || '';
 
+  const stageVal = ticket['Change Stage'] || 'Development';
+  const statusVal = ticket['Change Status'] || 'Active';
+  ensureSelectOption('newTicketStage', stageVal);
+  ensureSelectOption('newTicketChangeStatus', statusVal);
+  document.getElementById('newTicketStage').value = stageVal;
+  document.getElementById('newTicketChangeStatus').value = statusVal;
+
   document.getElementById('newTicketType').value = ticket['Change Type'] || 'Normal';
   document.getElementById('newTicketStatus').value = ticket['Release Status'] || 'For release';
+  document.getElementById('ticketRemarks').value = ticket.Remarks || '';
+
+  const currentSprint = ticket.Sprint || customSprints[0] || 'Sprint 10';
+  const allSprints = [...new Set([...customSprints, ...rawData.map((d) => d.Sprint || 'Sprint 10')])];
+  const otherSprints = allSprints.filter((s) => s !== currentSprint);
+  const targetSelect = document.getElementById('targetSprintSelect');
+  if (otherSprints.length === 0) {
+    targetSelect.innerHTML = '<option value="">No other sprint available</option>';
+  } else {
+    targetSelect.innerHTML = otherSprints
+      .map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`)
+      .join('');
+  }
+}
+
+async function transferTicketSprint() {
+  if (!requireDatabaseConnection('transfer a ticket')) return;
+  const idVal = document.getElementById('editingTicketId').value;
+  if (!idVal) return;
+
+  const ticket = findTicketById(parseInt(idVal, 10));
+  if (!ticket) return;
+
+  const targetSprint = document.getElementById('targetSprintSelect').value;
+  const currentSprint = ticket.Sprint || 'Sprint 10';
+  const transferReason = document.getElementById('ticketRemarks').value.trim();
+
+  if (!targetSprint) {
+    alert('Please select a target Sprint to transfer.');
+    return;
+  }
+  if (targetSprint === currentSprint) {
+    alert('Target sprint must be different from current sprint.');
+    return;
+  }
+
+  const result = await apiPost(API.ticketTransferSprint, {
+    id: parseInt(idVal, 10),
+    targetSprint,
+    transferReason,
+  });
+
+  if (!result.success) {
+    alert(result.message || 'Unable to transfer ticket.');
+    return;
+  }
+
+  const updated = result.data && result.data.ticket;
+  if (updated) {
+    document.getElementById('newTicketSprint').value = updated.Sprint || targetSprint;
+    document.getElementById('ticketRemarks').value = updated.Remarks || '';
+    fillModalFields(updated);
+  }
+
+  await fetchDBData();
+  alert(`Ticket successfully transferred to ${targetSprint}!`);
 }
 
 function setFormDisabled(disabled) {
@@ -522,8 +672,13 @@ function setFormDisabled(disabled) {
   document.getElementById('newTicketTitle').disabled = disabled;
   document.getElementById('newTicketDev').disabled = disabled;
   document.getElementById('newTicketQA').disabled = disabled;
+  document.getElementById('newTicketStage').disabled = disabled;
+  document.getElementById('newTicketChangeStatus').disabled = disabled;
   document.getElementById('newTicketType').disabled = disabled;
   document.getElementById('newTicketStatus').disabled = disabled;
+  document.getElementById('ticketRemarks').disabled = disabled;
+  document.getElementById('targetSprintSelect').disabled = disabled;
+  document.getElementById('transferSprintBtn').disabled = disabled;
 }
 
 async function deleteCurrentTicket() {
@@ -609,6 +764,7 @@ function downloadXlsxTemplate() {
       'Change Type': 'Normal',
       'Created Time': '09-18-2026 10:00',
       'Release Status': 'For release',
+      Remarks: '',
     },
   ];
 
@@ -616,6 +772,34 @@ function downloadXlsxTemplate() {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Tickets');
   XLSX.writeFile(workbook, 'QA_Tickets_Import_Template.xlsx');
+}
+
+function exportAllExistingFiles() {
+  if (!requireDatabaseConnection('export data')) return;
+  if (!rawData || rawData.length === 0) {
+    alert('No data available to export.');
+    return;
+  }
+
+  const exportArray = rawData.map((item) => ({
+    Sprint: item.Sprint || 'Sprint 10',
+    'Change ID': item['Change ID'] || '',
+    Title: item.Title || '',
+    'Change Owner': item['Change Owner'] || '',
+    'Assigned QA': item['Assigned QA'] || '',
+    'Change Stage': item['Change Stage'] || '',
+    'Change Status': item['Change Status'] || '',
+    'Change Type': item['Change Type'] || '',
+    'Created Time': item['Created Time'] || '',
+    'Release Status': item['Release Status'] || '',
+    Remarks: item.Remarks || '',
+  }));
+
+  const worksheet = XLSX.utils.json_to_sheet(exportArray);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'All_Tickets');
+  const dateStr = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(workbook, `QA_Tickets_Export_${dateStr}.xlsx`);
 }
 
 async function uploadXlsxData() {
@@ -652,6 +836,7 @@ async function uploadXlsxData() {
       'Change Type': row['Change Type'] || 'Normal',
       'Created Time': row['Created Time'] || new Date().toLocaleString(),
       'Release Status': row['Release Status'] || 'For release',
+      Remarks: row.Remarks || '',
     }));
 
     const result = await apiPost(API.ticketImport, { tickets: parsedRows });
@@ -662,8 +847,13 @@ async function uploadXlsxData() {
 
     closeModal('importModal');
     fileInput.value = '';
-    const { imported = 0, skipped = 0 } = result.data || {};
-    alert(`Import complete: ${imported} imported, ${skipped} skipped.`);
+    const { imported = 0, updated = 0, skipped = 0 } = result.data || {};
+    currentPage = 1;
+    alert(
+      `Import completed!\n- ${updated} ticket(s) updated/overwritten\n- ${imported} new ticket(s) added` +
+        (skipped > 0 ? `\n- ${skipped} row(s) skipped` : '') +
+        '.'
+    );
     await fetchDBData();
   };
 
@@ -676,19 +866,26 @@ async function submitTicket() {
   const isEdit = idVal !== '';
   const existing = isEdit ? findTicketById(parseInt(idVal, 10)) : null;
 
+  const owner = document.getElementById('newTicketDev').value.trim();
+  if (!owner) {
+    alert('Please select or add a Developer (Change Owner). Use + New Dev / QA if the list is empty.');
+    return;
+  }
+
   const ticket = {
     Sprint: document.getElementById('newTicketSprint').value,
     'Change ID':
       document.getElementById('newTicketId').value ||
       `CH-${Math.floor(1000 + Math.random() * 9000)}`,
     Title: document.getElementById('newTicketTitle').value || 'New Change Request',
-    'Change Owner': document.getElementById('newTicketDev').value,
+    'Change Owner': owner,
     'Assigned QA': document.getElementById('newTicketQA').value,
     'Change Type': document.getElementById('newTicketType').value,
     'Release Status': document.getElementById('newTicketStatus').value,
-    'Change Stage': isEdit ? existing['Change Stage'] : 'Development',
-    'Change Status': isEdit ? existing['Change Status'] : 'Active',
-    'Created Time': isEdit ? existing['Created Time'] : undefined,
+    'Change Stage': document.getElementById('newTicketStage').value,
+    'Change Status': document.getElementById('newTicketChangeStatus').value,
+    'Created Time': isEdit && existing ? existing['Created Time'] : undefined,
+    Remarks: document.getElementById('ticketRemarks').value,
   };
 
   if (!ticket['Change ID'].trim()) {
@@ -757,6 +954,7 @@ function resetFilters() {
   document.querySelectorAll('.th-sort-icon').forEach((icon) => {
     icon.textContent = '↕';
   });
+  currentPage = 1;
   renderApp();
 }
 

@@ -46,6 +46,15 @@ Use this checklist in a browser after the database is configured and SQL is impo
 |------|--------|----------|
 | S1 | Click column headers (Change ID, Title, dates, etc.) | Rows reorder; toggle asc/desc where supported |
 
+## Pagination
+
+| Step | Action | Expected |
+|------|--------|----------|
+| Pg1 | With 51+ seed tickets, default **10 rows per page** | Footer shows “Showing 1–10 of N”; only 10 table rows |
+| Pg2 | Change rows per page to 25 / 50 / 100 | Table and footer update |
+| Pg3 | **Previous** / **Next** | Page changes; buttons disable at first/last page |
+| Pg4 | Apply a filter | Resets to page 1 |
+
 ## Tickets — CRUD
 
 | Step | Action | Expected | Auto ref |
@@ -54,9 +63,11 @@ Use this checklist in a browser after the database is configured and SQL is impo
 | T2 | **View** ticket | Read-only modal with correct fields | — |
 | T3 | **Edit** ticket — change Title / Release Status | Updates persist after refresh | 6 |
 | T4 | **Edit** — Change ID field | Disabled (cannot change Change ID) | — |
-| T5 | **Edit** — Change Stage / Status | Unchanged unless you intentionally edit (preserved from row) | — |
+| T5 | **Add/Edit** — **Change Stage** and **Change Status** in modal | Values save and persist after refresh | — |
 | T6 | **Delete** ticket | Row removed; KPIs update | 10 |
-| T7 | **History** (⋮ menu) | Lists create/update/import/delete actions with timestamps and field changes | 12 |
+| T7 | **History** (⋮ menu) | Lists create/update/import/delete/transferred actions with timestamps and field changes | 12, 13 |
+| T8 | **Edit** — **Transfer Sprint** to another sprint with note | Sprint updates; remarks append transfer line; History shows Transferred | 13 |
+| T9 | **Remarks / Notes** on save (no transfer) | Text persists after refresh | — |
 
 ## Sprint and members
 
@@ -69,9 +80,9 @@ Use this checklist in a browser after the database is configured and SQL is impo
 
 | Step | Action | Expected | Auto ref |
 |------|--------|----------|----------|
-| I1 | Download template (if offered) / use sample columns | Columns align with app fields |
-| I2 | Upload valid XLSX with new Change IDs | Rows imported; table updates | 9 |
-| I3 | Upload row with duplicate Change ID | Row skipped or error surfaced; no duplicate IDs | 7 |
+| I1 | Download template / **Export All Existing Data** | XLSX columns match app fields; export includes all loaded tickets |
+| I2 | Upload valid XLSX with new Change IDs | New rows added; alert shows insert count | 9 |
+| I3 | Upload row with existing **Change ID** | Row overwritten; alert shows updated count; no duplicate IDs | 9 |
 
 ## Negative / validation
 

@@ -11,9 +11,12 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 $body = readJsonBody();
 $ticket = $body['ticket'] ?? $body;
-$fields = ticketPayloadFromRequest($ticket, false);
+if (!is_array($ticket)) {
+    jsonError('Invalid ticket data.');
+}
 
 try {
+    $fields = ticketPayloadFromRequest($ticket, false);
     $pdo = assertDatabaseConnection();
     $newId = dbTransaction($pdo, function (PDO $pdo) use ($fields) {
         $newId = insertTicket($pdo, $fields);
@@ -34,6 +37,11 @@ try {
     });
 
     jsonSuccess(['id' => $newId]);
+} catch (TicketValidationException $e) {
+    jsonError($e->getMessage());
 } catch (PDOException $e) {
     handleDbException($e);
+} catch (Throwable $e) {
+    logServerError($e);
+    jsonError('Unable to create ticket.', 500, false);
 }
